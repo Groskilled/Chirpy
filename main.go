@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -51,7 +53,7 @@ func SendErrorResponse(w http.ResponseWriter, r *http.Request, text string) {
 func (cfg *apiConfig) SendValidResponse(w http.ResponseWriter, r *http.Request, text string) {
 	type returnVals struct {
 		Id          int    `json:"id"`
-		CleanedBody string `json:"cleaned_body"`
+		CleanedBody string `json:"body"`
 	}
 
 	cfg.mutex.Lock()
@@ -59,7 +61,6 @@ func (cfg *apiConfig) SendValidResponse(w http.ResponseWriter, r *http.Request, 
 	id := cfg.index
 	cfg.mutex.Unlock()
 
-	fmt.Printf("SendValidResponse before respBody\n")
 	respBody := returnVals{
 		Id:          id,
 		CleanedBody: removeProfane(text),
@@ -70,7 +71,6 @@ func (cfg *apiConfig) SendValidResponse(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(500)
 		return
 	}
-	fmt.Printf("SendValidResponse Marshall OK\n")
 	_, err = cfg.db.CreateChirp(respBody.Id, respBody.CleanedBody)
 	if err != nil {
 		fmt.Printf("Error while creating Chirp: %s\n", err)
@@ -82,18 +82,50 @@ func (cfg *apiConfig) SendValidResponse(w http.ResponseWriter, r *http.Request, 
 }
 
 func (cfg *apiConfig) GetAllChirps(w http.ResponseWriter, r *http.Request) {
-	htmlContent, err := os.ReadFile("metrics.html")
+	chirps, err := cfg.db.GetChirps()
 	if err != nil {
-		log.Printf("Error reading template file: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		fmt.Printf("Error while loading DB: %s\n", err)
+	}
+	sort.Slice(chirps, func(i, j int) bool { return chirps[i].Id < chirps[j].Id })
+	dat, err := json.Marshal(chirps)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
 		return
 	}
 
-	formattedHTML := fmt.Sprintf(string(htmlContent), cfg.fileserverHits)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(formattedHTML))
+func (cfg *apiConfig) GetChirp(w http.ResponseWriter, r *http.Request) {
+	chirpId, er := strconv.Atoi(r.PathValue("chirpID"))
+	if er != nil {
+		fmt.Printf("Atoi Failed: %s\n", er)
+		w.WriteHeader(500)
+		return
+	}
+	chirps, err := cfg.db.GetChirps()
+	if err != nil {
+		fmt.Printf("Error while loading DB: %s\n", err)
+	}
+	for _, chirp := range chirps {
+		if chirp.Id == chirpId {
+			dat, err := json.Marshal(chirp)
+			if err != nil {
+				log.Printf("Error marshalling JSON: %s", err)
+				w.WriteHeader(500)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(200)
+			w.Write(dat)
+			return
+		}
+	}
+	w.WriteHeader(404)
 }
 
 func (cfg *apiConfig) DecodeHandler(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +206,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /api/chirps", apiCfg.DecodeHandler)
 	mux.HandleFunc("GET /api/chirps", apiCfg.GetAllChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.GetChirp)
 
 	srv := &http.Server{
 		Addr:    ":" + port,

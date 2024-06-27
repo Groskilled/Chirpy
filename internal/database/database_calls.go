@@ -2,6 +2,7 @@ package database
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,8 +19,8 @@ type DBStructure struct {
 }
 
 type Chirp struct {
-	Id   int
-	Body string
+	Id   int    `json:"id"`
+	Body string `json:"body"`
 }
 
 func NewDB(path string) (*DB, error) {
@@ -34,22 +35,37 @@ func NewDB(path string) (*DB, error) {
 	return &newDB, nil
 }
 
+// GetChirps returns all chirps in the database
+func (db *DB) GetChirps() ([]Chirp, error) {
+	dbStruct, err := db.loadDB()
+	if err != nil {
+		return nil, err
+	}
+	if dbStruct.Chirps == nil {
+		return nil, errors.New("no chirps available")
+	}
+	chirps := make([]Chirp, 0, len(dbStruct.Chirps))
+	for _, chirp := range dbStruct.Chirps {
+		chirps = append(chirps, chirp)
+	}
+	return chirps, nil
+
+}
+
 // CreateChirp creates a new chirp and saves it to disk
 func (db *DB) CreateChirp(id int, body string) (Chirp, error) {
-	fmt.Printf("CreateChrip\n")
 	newChirp := Chirp{
 		Id:   id,
 		Body: body,
 	}
-	fmt.Printf("NewChrip ok\n")
 	dbStruct, err := db.loadDB()
-	fmt.Printf("CreateChrip loaded DB\n")
 	if err != nil {
 		fmt.Printf("Could not load DB. Error: %s\n", err)
 	}
-	// TODO: Fix the next line
+	if dbStruct.Chirps == nil {
+		dbStruct.Chirps = make(map[int]Chirp)
+	}
 	dbStruct.Chirps[newChirp.Id] = newChirp
-	fmt.Printf("added new chirp\n")
 	err = db.writeDB(dbStruct)
 	if err != nil {
 		fmt.Printf("Error writing to DB: %s\n", err)
@@ -105,7 +121,6 @@ func (db *DB) writeDB(dbStructure DBStructure) error {
 func (db *DB) loadDB() (DBStructure, error) {
 	var dbStructure DBStructure
 
-	fmt.Printf("loadDB\n")
 	file, err := os.Open(db.path)
 	if err != nil {
 		return dbStructure, fmt.Errorf("error opening file: %v", err)
@@ -120,7 +135,6 @@ func (db *DB) loadDB() (DBStructure, error) {
 	if err := json.Unmarshal(bytes, &dbStructure); err != nil {
 		return dbStructure, fmt.Errorf("error unmarshalling JSON: %v", err)
 	}
-	fmt.Printf("End of loadDB\n")
 
 	return dbStructure, nil
 }
