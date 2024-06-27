@@ -6,10 +6,21 @@ import (
 	"os"
 	"fmt"
 	"encoding/json"
+	"strings"
 )
 
 type apiConfig struct {
 	fileserverHits int
+}
+
+func removeProfane(text string) string {
+	splitted := strings.Split(text, " ")
+	for i, word := range splitted {
+		if strings.ToLower(word) == "kerfuffle" || strings.ToLower(word) =="sharbert" || strings.ToLower(word) == "fornax" {
+			splitted[i] = "****"
+		}	
+	}
+	return strings.Join(splitted, " ")
 }
 
 
@@ -32,12 +43,12 @@ func SendErrorResponse(w http.ResponseWriter, r *http.Request, text string){
 }
 
 
-func SendValidResponse(w http.ResponseWriter, r *http.Request){
+func SendValidResponse(w http.ResponseWriter, r *http.Request, text string){
     type returnVals struct {
-        Valid bool `json:"valid"`
+        cleanedBody string `json:"cleaned_body"`
     }
     respBody := returnVals{
-		Valid:true,
+		cleanedBody:removeProfane(text),
     }
     dat, err := json.Marshal(respBody)
 	if err != nil {
@@ -67,7 +78,7 @@ func DecodeHandler(w http.ResponseWriter, r *http.Request){
 	if len(params.Body) > 140 {
 		SendErrorResponse(w, r, "Chirp is too long")
 	} else {
-		SendValidResponse(w, r)
+		SendValidResponse(w, r, params.Body)
 	}
 }
 
