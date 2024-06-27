@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"fmt"
-	"encoding/json"
 	"strings"
 )
 
@@ -16,65 +16,63 @@ type apiConfig struct {
 func removeProfane(text string) string {
 	splitted := strings.Split(text, " ")
 	for i, word := range splitted {
-		if strings.ToLower(word) == "kerfuffle" || strings.ToLower(word) =="sharbert" || strings.ToLower(word) == "fornax" {
+		if strings.ToLower(word) == "kerfuffle" || strings.ToLower(word) == "sharbert" || strings.ToLower(word) == "fornax" {
 			splitted[i] = "****"
-		}	
+		}
 	}
-	return strings.Join(splitted, " ")
+	res := strings.Join(splitted, " ")
+	return res
 }
 
-
-func SendErrorResponse(w http.ResponseWriter, r *http.Request, text string){
-    type returnVals struct {
-        Error string `json:"error"`
-    }
-    respBody := returnVals{
+func SendErrorResponse(w http.ResponseWriter, r *http.Request, text string) {
+	type returnVals struct {
+		Error string `json:"error"`
+	}
+	respBody := returnVals{
 		Error: text,
-    }
-    dat, err := json.Marshal(respBody)
+	}
+	dat, err := json.Marshal(respBody)
 	if err != nil {
 		log.Printf("Error marshalling JSON: %s", err)
 		w.WriteHeader(500)
 		return
 	}
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(400)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
 	w.Write(dat)
 }
 
-
-func SendValidResponse(w http.ResponseWriter, r *http.Request, text string){
-    type returnVals struct {
-        cleanedBody string `json:"cleaned_body"`
-    }
-    respBody := returnVals{
-		cleanedBody:removeProfane(text),
-    }
-    dat, err := json.Marshal(respBody)
+func SendValidResponse(w http.ResponseWriter, r *http.Request, text string) {
+	type returnVals struct {
+		CleanedBody string `json:"cleaned_body"`
+	}
+	respBody := returnVals{
+		CleanedBody: removeProfane(text),
+	}
+	dat, err := json.Marshal(respBody)
 	if err != nil {
 		log.Printf("Error marshalling JSON: %s", err)
 		w.WriteHeader(500)
 		return
 	}
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(200)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
 	w.Write(dat)
 }
 
+func DecodeHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"body"`
+	}
 
-func DecodeHandler(w http.ResponseWriter, r *http.Request){
-    type parameters struct {
-        Body string `json:"body"`
-    }
-
-    decoder := json.NewDecoder(r.Body)
-    params := parameters{}
-    err := decoder.Decode(&params)
-    if err != nil {
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
 		log.Printf("Error decoding parameters: %s", err)
 		SendErrorResponse(w, r, "Something went wrong")
 		return
-    }
+	}
 	if len(params.Body) > 140 {
 		SendErrorResponse(w, r, "Chirp is too long")
 	} else {
@@ -82,21 +80,19 @@ func DecodeHandler(w http.ResponseWriter, r *http.Request){
 	}
 }
 
-
-
 func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
-    htmlContent, err := os.ReadFile("metrics.html")
-    if err != nil {
-        log.Printf("Error reading template file: %v", err)
-        http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-        return
-    }
+	htmlContent, err := os.ReadFile("metrics.html")
+	if err != nil {
+		log.Printf("Error reading template file: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 
-    formattedHTML := fmt.Sprintf(string(htmlContent), cfg.fileserverHits)
+	formattedHTML := fmt.Sprintf(string(htmlContent), cfg.fileserverHits)
 
-    w.Header().Set("Content-Type", "text/html; charset=utf-8")
-    w.WriteHeader(http.StatusOK)
-    w.Write([]byte(formattedHTML))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(formattedHTML))
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
