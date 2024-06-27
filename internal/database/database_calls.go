@@ -3,7 +3,7 @@ package database
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"sync"
 )
@@ -22,12 +22,45 @@ type Chirp struct {
 	Body string
 }
 
-func (db *DB) ensureDB() error {
-	filename := "database.json"
+func NewDB(path string) (*DB, error) {
+	newDB := DB{
+		path: path,
+	}
+	err := newDB.ensureDB()
+	if err != nil {
+		fmt.Println("Couldnt create connection to DB")
+		return nil, err
+	}
+	return &newDB, nil
+}
 
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
+// CreateChirp creates a new chirp and saves it to disk
+func (db *DB) CreateChirp(id int, body string) (Chirp, error) {
+	fmt.Printf("CreateChrip\n")
+	newChirp := Chirp{
+		Id:   id,
+		Body: body,
+	}
+	fmt.Printf("NewChrip ok\n")
+	dbStruct, err := db.loadDB()
+	fmt.Printf("CreateChrip loaded DB\n")
+	if err != nil {
+		fmt.Printf("Could not load DB. Error: %s\n", err)
+	}
+	// TODO: Fix the next line
+	dbStruct.Chirps[newChirp.Id] = newChirp
+	fmt.Printf("added new chirp\n")
+	err = db.writeDB(dbStruct)
+	if err != nil {
+		fmt.Printf("Error writing to DB: %s\n", err)
+	}
+	return newChirp, nil
+}
+
+func (db *DB) ensureDB() error {
+	if _, err := os.Stat(db.path); os.IsNotExist(err) {
 		// File does not exist, create it
-		file, err := os.Create(filename)
+		file, err := os.Create(db.path)
 		if err != nil {
 			fmt.Printf("Error creating file: %v\n", err)
 			return err
@@ -41,18 +74,18 @@ func (db *DB) ensureDB() error {
 			return err
 		}
 
-		fmt.Printf("File %s created successfully.\n", filename)
+		fmt.Printf("File %s created successfully.\n", db.path)
 	} else if err != nil {
 		fmt.Printf("Error checking file: %v\n", err)
 	} else {
-		fmt.Printf("File %s already exists.\n", filename)
+		fmt.Printf("File %s already exists.\n", db.path)
 	}
 	return nil
 }
 
 func (db *DB) writeDB(dbStructure DBStructure) error {
 	// Open the file for writing, create if it doesn't exist, truncate if it does
-	file, err := os.Create("database.json")
+	file, err := os.Create(db.path)
 	if err != nil {
 		return fmt.Errorf("error creating file: %w", err)
 	}
@@ -72,13 +105,14 @@ func (db *DB) writeDB(dbStructure DBStructure) error {
 func (db *DB) loadDB() (DBStructure, error) {
 	var dbStructure DBStructure
 
-	file, err := os.Open("database.json")
+	fmt.Printf("loadDB\n")
+	file, err := os.Open(db.path)
 	if err != nil {
 		return dbStructure, fmt.Errorf("error opening file: %v", err)
 	}
 	defer file.Close()
 
-	bytes, err := ioutil.ReadAll(file)
+	bytes, err := io.ReadAll(file)
 	if err != nil {
 		return dbStructure, fmt.Errorf("error reading file: %v", err)
 	}
@@ -86,6 +120,7 @@ func (db *DB) loadDB() (DBStructure, error) {
 	if err := json.Unmarshal(bytes, &dbStructure); err != nil {
 		return dbStructure, fmt.Errorf("error unmarshalling JSON: %v", err)
 	}
+	fmt.Printf("End of loadDB\n")
 
 	return dbStructure, nil
 }
