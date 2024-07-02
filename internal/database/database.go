@@ -2,99 +2,85 @@ package database
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
+	"errors"
 	"os"
 	"sync"
-
-	"github.com/Groskilled/Chirpy/internal/entities"
 )
+
+var ErrNotExist = errors.New("resource does not exist")
 
 type DB struct {
 	path string
-	mux  *sync.RWMutex
+	mu   *sync.RWMutex
 }
 
 type DBStructure struct {
-	Chirps map[int]entities.ChirpInterface `json:"chirps"`
-	Users  map[int]entities.UserInterface  `json:"users"`
+	Chirps map[int]Chirp `json:"chirps"`
+	Users  map[int]User  `json:"users"`
 }
 
 func NewDB(path string) (*DB, error) {
-	newDB := DB{
+	db := &DB{
 		path: path,
+		mu:   &sync.RWMutex{},
 	}
-	err := newDB.EnsureDB()
-	if err != nil {
-		fmt.Println("Couldnt create connection to DB")
-		return nil, err
-	}
-	return &newDB, nil
+	err := db.ensureDB()
+	return db, err
 }
 
-func (db *DB) EnsureDB() error {
-	if _, err := os.Stat(db.path); os.IsNotExist(err) {
-		// File does not exist, create it
-		file, err := os.Create(db.path)
-		if err != nil {
-			fmt.Printf("Error creating file: %v\n", err)
-			return err
-		}
-		defer file.Close()
-
-		// Optionally, you can write an empty JSON object to the file
-		_, err = file.WriteString("{}")
-		if err != nil {
-			fmt.Printf("Error writing to file: %v\n", err)
-			return err
-		}
-
-		fmt.Printf("File %s created successfully.\n", db.path)
-	} else if err != nil {
-		fmt.Printf("Error checking file: %v\n", err)
-	} else {
-		fmt.Printf("File %s already exists.\n", db.path)
+func (db *DB) createDB() error {
+	dbStructure := DBStructure{
+		Chirps: map[int]Chirp{},
+		Users:  map[int]User{},
 	}
-	return nil
+	return db.writeDB(dbStructure)
 }
 
-func (db *DB) WriteDB(dbStructure DBStructure) error {
-	// Open the file for writing, create if it doesn't exist, truncate if it does
-	fmt.Println("Write to db")
-	file, err := os.Create(db.path)
-	if err != nil {
-		return fmt.Errorf("error creating file: %w", err)
+func (db *DB) ensureDB() error {
+	_, err := os.ReadFile(db.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return db.createDB()
 	}
-	defer file.Close()
-
-	// Encode the dbStructure into JSON format and write to the file
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ") // Optional: for pretty-printing
-
-	if err := encoder.Encode(&dbStructure); err != nil {
-		return fmt.Errorf("error writing to file: %w", err)
-	}
-
-	return nil
+	return err
 }
 
-func (db *DB) LoadDB() (DBStructure, error) {
-	var dbStructure DBStructure
-
-	file, err := os.Open(db.path)
-	if err != nil {
-		return dbStructure, fmt.Errorf("error opening file: %v", err)
+func (db *DB) ResetDB() error {
+	err := os.Remove(db.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	defer file.Close()
+	return db.ensureDB()
+}
 
-	bytes, err := io.ReadAll(file)
-	if err != nil {
-		return dbStructure, fmt.Errorf("error reading file: %v", err)
+func (db *DB) loadDB() (DBStructure, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	dbStructure := DBStructure{}
+	dat, err := os.ReadFile(db.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return dbStructure, err
 	}
-
-	if err := json.Unmarshal(bytes, &dbStructure); err != nil {
-		return dbStructure, fmt.Errorf("error unmarshalling JSON: %v", err)
+	err = json.Unmarshal(dat, &dbStructure)
+	if err != nil {
+		return dbStructure, err
 	}
 
 	return dbStructure, nil
+}
+
+func (db *DB) writeDB(dbStructure DBStructure) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	dat, err := json.Marshal(dbStructure)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(db.path, dat, 0600)
+	if err != nil {
+		return err
+	}
+	return nil
 }
