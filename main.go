@@ -11,7 +11,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Groskilled/Chirpy/internal/chirps"
 	"github.com/Groskilled/Chirpy/internal/database"
+	"github.com/Groskilled/Chirpy/internal/users"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type apiConfig struct {
@@ -71,7 +75,7 @@ func (cfg *apiConfig) SendValidResponse(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(500)
 		return
 	}
-	_, err = cfg.db.CreateChirp(respBody.Id, respBody.CleanedBody)
+	_, err = chirps.CreateChirp(cfg.db, respBody.Id, respBody.CleanedBody)
 	if err != nil {
 		fmt.Printf("Error while creating Chirp: %s\n", err)
 	}
@@ -82,7 +86,7 @@ func (cfg *apiConfig) SendValidResponse(w http.ResponseWriter, r *http.Request, 
 }
 
 func (cfg *apiConfig) GetAllChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.db.GetChirps()
+	chirps, err := chirps.GetChirps(cfg.db)
 	if err != nil {
 		fmt.Printf("Error while loading DB: %s\n", err)
 	}
@@ -106,26 +110,70 @@ func (cfg *apiConfig) GetChirp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		return
 	}
-	chirps, err := cfg.db.GetChirps()
+	chirp, err := chirps.GetChirpById(cfg.db, chirpId)
 	if err != nil {
-		fmt.Printf("Error while loading DB: %s\n", err)
+		w.WriteHeader(404)
+		return
 	}
-	for _, chirp := range chirps {
-		if chirp.Id == chirpId {
-			dat, err := json.Marshal(chirp)
-			if err != nil {
-				log.Printf("Error marshalling JSON: %s", err)
-				w.WriteHeader(500)
-				return
-			}
+	dat, err := json.Marshal(chirp)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(200)
-			w.Write(dat)
-			return
-		}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
+	return
+}
+
+func (cfg *apiConfig) SendValidUser(w http.ResponseWriter, r *http.Request, email string, pw string) {
+	type returnVals struct {
+		Id    int    `json:"id"`
+		Email string `json:"email"`
+		//Password string `json:"password"`
 	}
-	w.WriteHeader(404)
+
+	cfg.mutex.Lock()
+	cfg.index++
+	id := cfg.index
+	cfg.mutex.Unlock()
+
+	respBody := returnVals{
+		Id:    id,
+		Email: email,
+	}
+	dat, err := json.Marshal(respBody)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	hashedPw, err := bcrypt.GenerateFromPassword([]byte(pw), 14)
+	_, err = users.CreateUser(cfg.db, respBody.Id, respBody.Email, string(hashedPw))
+	if err != nil {
+		fmt.Printf("Error while creating User: %s\n", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	w.Write(dat)
+}
+
+func (cfg *apiConfig) PostUsers(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		SendErrorResponse(w, r, "Something went wrong")
+		return
+	}
 }
 
 func (cfg *apiConfig) DecodeHandler(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +194,81 @@ func (cfg *apiConfig) DecodeHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		cfg.SendValidResponse(w, r, params.Body)
 	}
+}
+
+func (cfg *apiConfig) DecodeUser(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		SendErrorResponse(w, r, "Something went wrong")
+		return
+	}
+	cfg.SendValidUser(w, r, params.Email, params.Password)
+}
+
+func (cfg *apiConfig) Login(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		SendErrorResponse(w, r, "Something went wrong")
+		return
+	}
+	usr, _ := users.GetUserByEmail(cfg.db, params.Email)
+	if usr.Email == "" {
+		SendErrorResponse(w, r, "Unknown User")
+		return
+	}
+	err = bcrypt.CompareHashAndPassword([]byte(usr.Password), []byte(params.Password))
+	if err != nil {
+		w.WriteHeader(401)
+		type returnVals struct {
+			Error string `json:"error"`
+		}
+		respBody := returnVals{
+			Error: "Unauthorized",
+		}
+		dat, err := json.Marshal(respBody)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(dat)
+		return
+	}
+	type UserResponse struct {
+		Id    int    `json:"id"`
+		Email string `json:"email"`
+	}
+	response := UserResponse{
+		Id:    usr.Id,
+		Email: usr.Email,
+	}
+	dat, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	w.Write(dat)
 }
 
 func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +330,8 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiCfg.DecodeHandler)
 	mux.HandleFunc("GET /api/chirps", apiCfg.GetAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.GetChirp)
+	mux.HandleFunc("POST /api/users", apiCfg.DecodeUser)
+	mux.HandleFunc("POST /api/login", apiCfg.Login)
 
 	srv := &http.Server{
 		Addr:    ":" + port,

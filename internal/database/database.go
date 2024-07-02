@@ -2,11 +2,12 @@ package database
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/Groskilled/Chirpy/internal/entities"
 )
 
 type DB struct {
@@ -15,19 +16,15 @@ type DB struct {
 }
 
 type DBStructure struct {
-	Chirps map[int]Chirp `json:"chirps"`
-}
-
-type Chirp struct {
-	Id   int    `json:"id"`
-	Body string `json:"body"`
+	Chirps map[int]entities.ChirpInterface `json:"chirps"`
+	Users  map[int]entities.UserInterface  `json:"users"`
 }
 
 func NewDB(path string) (*DB, error) {
 	newDB := DB{
 		path: path,
 	}
-	err := newDB.ensureDB()
+	err := newDB.EnsureDB()
 	if err != nil {
 		fmt.Println("Couldnt create connection to DB")
 		return nil, err
@@ -35,45 +32,7 @@ func NewDB(path string) (*DB, error) {
 	return &newDB, nil
 }
 
-// GetChirps returns all chirps in the database
-func (db *DB) GetChirps() ([]Chirp, error) {
-	dbStruct, err := db.loadDB()
-	if err != nil {
-		return nil, err
-	}
-	if dbStruct.Chirps == nil {
-		return nil, errors.New("no chirps available")
-	}
-	chirps := make([]Chirp, 0, len(dbStruct.Chirps))
-	for _, chirp := range dbStruct.Chirps {
-		chirps = append(chirps, chirp)
-	}
-	return chirps, nil
-
-}
-
-// CreateChirp creates a new chirp and saves it to disk
-func (db *DB) CreateChirp(id int, body string) (Chirp, error) {
-	newChirp := Chirp{
-		Id:   id,
-		Body: body,
-	}
-	dbStruct, err := db.loadDB()
-	if err != nil {
-		fmt.Printf("Could not load DB. Error: %s\n", err)
-	}
-	if dbStruct.Chirps == nil {
-		dbStruct.Chirps = make(map[int]Chirp)
-	}
-	dbStruct.Chirps[newChirp.Id] = newChirp
-	err = db.writeDB(dbStruct)
-	if err != nil {
-		fmt.Printf("Error writing to DB: %s\n", err)
-	}
-	return newChirp, nil
-}
-
-func (db *DB) ensureDB() error {
+func (db *DB) EnsureDB() error {
 	if _, err := os.Stat(db.path); os.IsNotExist(err) {
 		// File does not exist, create it
 		file, err := os.Create(db.path)
@@ -99,8 +58,9 @@ func (db *DB) ensureDB() error {
 	return nil
 }
 
-func (db *DB) writeDB(dbStructure DBStructure) error {
+func (db *DB) WriteDB(dbStructure DBStructure) error {
 	// Open the file for writing, create if it doesn't exist, truncate if it does
+	fmt.Println("Write to db")
 	file, err := os.Create(db.path)
 	if err != nil {
 		return fmt.Errorf("error creating file: %w", err)
@@ -118,7 +78,7 @@ func (db *DB) writeDB(dbStructure DBStructure) error {
 	return nil
 }
 
-func (db *DB) loadDB() (DBStructure, error) {
+func (db *DB) LoadDB() (DBStructure, error) {
 	var dbStructure DBStructure
 
 	file, err := os.Open(db.path)
