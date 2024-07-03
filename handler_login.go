@@ -3,17 +3,21 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/Groskilled/Chirpy/internal/auth"
+	"github.com/Groskilled/Chirpy/internal/database"
 )
 
-func (cfg *apiConfig) HandlerLogin(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Password string `json:"password"`
 		Email    string `json:"email"`
 	}
 	type response struct {
-		User
+		database.User
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -36,10 +40,31 @@ func (cfg *apiConfig) HandlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	accessToken, err := auth.MakeJWT(
+		user.ID,
+		cfg.jwtSecret,
+		time.Hour,
+	)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create access JWT")
+		return
+	}
+
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create refresh token")
+		return
+	}
+
+	err = cfg.DB.SaveRefreshToken(user.ID, refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't save refresh token")
+		return
+	}
+
 	respondWithJSON(w, http.StatusOK, response{
-		User: User{
-			ID:    user.ID,
-			Email: user.Email,
-		},
+		User:         user,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
 	})
 }

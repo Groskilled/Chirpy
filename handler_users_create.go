@@ -9,19 +9,13 @@ import (
 	"github.com/Groskilled/Chirpy/internal/database"
 )
 
-type User struct {
-	ID       int    `json:"id"`
-	Email    string `json:"email"`
-	Password string `json:"-"`
-}
-
-func (cfg *apiConfig) HandlerUsersCreate(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerUsersCreate(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Password string `json:"password"`
 		Email    string `json:"email"`
 	}
 	type response struct {
-		User
+		database.User
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -50,9 +44,6 @@ func (cfg *apiConfig) HandlerUsersCreate(w http.ResponseWriter, r *http.Request)
 	}
 
 	respondWithJSON(w, http.StatusCreated, response{
-		User: User{
-			ID:    user.ID,
-			Email: user.Email,
-		},
+		User: user,
 	})
 }

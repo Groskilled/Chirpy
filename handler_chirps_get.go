@@ -4,9 +4,11 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+
+	"github.com/Groskilled/Chirpy/internal/database"
 )
 
-func (cfg *apiConfig) HandlerChirpsGet(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerChirpsGet(w http.ResponseWriter, r *http.Request) {
 	chirpIDString := r.PathValue("chirpID")
 	chirpID, err := strconv.Atoi(chirpIDString)
 	if err != nil {
@@ -20,22 +22,36 @@ func (cfg *apiConfig) HandlerChirpsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, Chirp{
-		ID:   dbChirp.ID,
-		Body: dbChirp.Body,
+	respondWithJSON(w, http.StatusOK, database.Chirp{
+		ID:       dbChirp.ID,
+		Body:     dbChirp.Body,
+		AuthorId: dbChirp.AuthorId,
 	})
 }
 
-func (cfg *apiConfig) HandlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
+	authId := -1
+	var err error
+	stringID := r.URL.Query().Get("author_id")
+	if stringID != "" {
+		authId, err = strconv.Atoi(stringID)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Couldn't retrieve chirps")
+			return
+		}
+	}
 	dbChirps, err := cfg.DB.GetChirps()
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps")
 		return
 	}
 
-	chirps := []Chirp{}
+	chirps := []database.Chirp{}
 	for _, dbChirp := range dbChirps {
-		chirps = append(chirps, Chirp{
+		if authId != -1 && dbChirp.AuthorId != authId {
+			continue
+		}
+		chirps = append(chirps, database.Chirp{
 			ID:   dbChirp.ID,
 			Body: dbChirp.Body,
 		})

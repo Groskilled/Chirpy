@@ -4,46 +4,70 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/Groskilled/Chirpy/internal/auth"
+	"github.com/Groskilled/Chirpy/internal/database"
 )
 
-type Chirp struct {
-	ID   int    `json:"id"`
-	Body string `json:"body"`
+func (cfg *apiConfig) GetUserId(w http.ResponseWriter, r *http.Request) (int, error) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT")
+		return -1, errors.New("No Bearer token found")
+	}
+	subject, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT")
+		return -1, errors.New("Couldn't validate JWT")
+	}
+
+	userIDInt, err := strconv.Atoi(subject)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't parse user ID")
+		return -1, err
+	}
+	return userIDInt, nil
 }
 
-func (cfg *apiConfig) HandlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
+	}
+	uId, err := cfg.GetUserId(w, r)
+	if err != nil {
+		return
 	}
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters")
 		return
 	}
 
-	cleaned, err := ValidateChirp(params.Body)
+	cleaned, err := validateChirp(params.Body)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	chirp, err := cfg.DB.CreateChirp(cleaned)
+	chirp, err := cfg.DB.CreateChirp(uId, cleaned)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create chirp")
 		return
 	}
 
-	respondWithJSON(w, http.StatusCreated, Chirp{
-		ID:   chirp.ID,
-		Body: chirp.Body,
+	respondWithJSON(w, http.StatusCreated, database.Chirp{
+		ID:       chirp.ID,
+		Body:     chirp.Body,
+		AuthorId: chirp.AuthorId,
 	})
 }
 
-func ValidateChirp(body string) (string, error) {
+func validateChirp(body string) (string, error) {
 	const maxChirpLength = 140
 	if len(body) > maxChirpLength {
 		return "", errors.New("Chirp is too long")
@@ -54,11 +78,11 @@ func ValidateChirp(body string) (string, error) {
 		"sharbert":  {},
 		"fornax":    {},
 	}
-	cleaned := GetCleanedBody(body, badWords)
+	cleaned := getCleanedBody(body, badWords)
 	return cleaned, nil
 }
 
-func GetCleanedBody(body string, badWords map[string]struct{}) string {
+func getCleanedBody(body string, badWords map[string]struct{}) string {
 	words := strings.Split(body, " ")
 	for i, word := range words {
 		loweredWord := strings.ToLower(word)
